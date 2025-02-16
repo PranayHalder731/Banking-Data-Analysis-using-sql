@@ -1,0 +1,177 @@
+Create database Banking_Db;
+use Banking_Db;
+drop database Banking_Db;
+show Tables;
+-- Customers Table
+CREATE TABLE Customers (
+    customer_id INT PRIMARY KEY,
+    first_name VARCHAR(50),
+    last_name VARCHAR(50),
+    date_of_birth DATE,
+    email VARCHAR(100),
+    phone BIGINT,
+    address VARCHAR(255),
+    city VARCHAR(50),
+    state VARCHAR(50),
+    zip_code INT,
+    created_at TIMESTAMP
+);
+
+-- Branches Table
+CREATE TABLE Branches (
+    branch_id INT PRIMARY KEY,
+    branch_name VARCHAR(50),
+    branch_address VARCHAR(255),
+    branch_location ENUM('Rural', 'Urban'),
+    city VARCHAR(50),
+    state VARCHAR(50),
+    zip_code INT,
+    phone BIGINT,
+    manager_id INT
+);
+
+-- Employees Table
+CREATE TABLE Employees (
+    employee_id INT PRIMARY KEY,
+    first_name VARCHAR(50),
+    last_name VARCHAR(50),
+    email VARCHAR(100),
+    phone BIGINT,
+    hire_date DATE,
+    position VARCHAR(50),
+    branch_id INT
+);
+
+-- Accounts Table
+CREATE TABLE Accounts (
+    account_number BIGINT PRIMARY KEY,
+    customer_id INT,
+    account_type ENUM('Savings', 'Current', 'Salary', 'OverDraft'),
+    balance DECIMAL(15,2),
+    branch_id INT,
+    created_at TIMESTAMP
+);
+
+-- Transactions Table
+CREATE TABLE Transactions (
+    transaction_id INT PRIMARY KEY,
+    account_number BIGINT,
+    transaction_type ENUM('Deposit', 'Withdrawal', 'Transfer'),
+    amount DECIMAL(15,2),
+    transaction_date TIMESTAMP
+);
+
+-- Adding foreign keys using ALTER TABLE
+ALTER TABLE Branch ADD CONSTRAINT fk_manager FOREIGN KEY (manager_id) REFERENCES Employees(employee_id);
+ALTER TABLE Employees ADD CONSTRAINT fk_branch FOREIGN KEY (branch_id) REFERENCES Branch(branch_id);
+ALTER TABLE Accounts ADD CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES Customers(customer_id);
+ALTER TABLE Accounts ADD CONSTRAINT fk_branch FOREIGN KEY (branch_id) REFERENCES Branch(branch_id);
+ALTER TABLE Transactions ADD CONSTRAINT fk_account_transaction FOREIGN KEY (account_number) REFERENCES Accounts(account_number);
+
+
+
+-- List all customers who haven't made transactions in the last year.
+SELECT C.customer_id, C.first_name, C.last_name
+FROM Customers C
+LEFT JOIN Accounts A ON C.customer_id = A.customer_id
+LEFT JOIN Transactions T ON A.account_number = T.account_number
+WHERE T.transaction_date < DATE_SUB(CURDATE(), INTERVAL 1 YEAR) 
+   OR T.transaction_date IS NULL;
+   
+-- 2: Summarize the total transaction amount per account per month.
+SELECT account_number, 
+       YEAR(transaction_date) AS year, 
+       MONTH(transaction_date) AS month, 
+       SUM(amount) AS total_amount
+FROM `Transactions`
+GROUP BY account_number, YEAR(transaction_date), MONTH(transaction_date);
+
+-- 3: Rank branches based on the total amount of deposits made in the last quarter.
+SELECT B.branch_name, 
+       SUM(T.amount) AS total_deposits,
+       RANK() OVER (ORDER BY SUM(T.amount) DESC) AS branch_rank
+FROM Branch B
+JOIN Accounts A ON B.branch_id = A.branch_id
+JOIN Transactions T ON A.account_number = T.account_number
+WHERE T.transaction_type = 'Deposit' 
+  AND T.transaction_date >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
+GROUP BY B.branch_name;
+
+-- 4.Find the name of the customer who has deposited the highest amount.
+SELECT C.first_name, C.last_name, SUM(T.amount) AS total_deposit
+FROM Customers C
+JOIN Accounts A ON C.customer_id = A.customer_id
+JOIN Transactions T ON A.account_number = T.account_number
+WHERE T.transaction_type = 'Deposit'
+GROUP BY C.customer_id
+ORDER BY total_deposit DESC
+LIMIT 1;
+
+-- 5.Identify any accounts that have made more than two transactions in a single day, which could indicate fraudulent activity.
+-- How can you verify any fraudulent transaction?
+SELECT account_number, transaction_date, COUNT(*) AS transaction_count
+FROM Transactions
+GROUP BY account_number, DATE(transaction_date)
+HAVING transaction_count > 2;
+
+-- 6.Calculate the average number of transactions per customer per account per month over the last year.
+SELECT C.customer_id, 
+       COUNT(T.transaction_id) / COUNT(DISTINCT A.account_number) / 12 AS avg_transactions_per_month
+FROM Customers C
+JOIN Accounts A ON C.customer_id = A.customer_id
+JOIN Transactions T ON A.account_number = T.account_number
+WHERE T.transaction_date >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+GROUP BY C.customer_id;
+
+-- 7: Write a query to find the daily transaction volume (total amount of all transactions) for the past month.
+SELECT DATE(transaction_date) AS transaction_date, 
+       SUM(amount) AS daily_transaction_volume
+FROM Transactions
+WHERE transaction_date >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)
+GROUP BY DATE(transaction_date);
+
+-- 8: Calculate the total transaction amount performed by each age group in the past year. (Age groups: 0-17, 18-30, 31-60, 60+)
+SELECT 
+    CASE 
+        WHEN TIMESTAMPDIFF(YEAR, C.date_of_birth, CURDATE()) BETWEEN 0 AND 17 THEN '0-17'
+        WHEN TIMESTAMPDIFF(YEAR, C.date_of_birth, CURDATE()) BETWEEN 18 AND 30 THEN '18-30'
+        WHEN TIMESTAMPDIFF(YEAR, C.date_of_birth, CURDATE()) BETWEEN 31 AND 60 THEN '31-60'
+        ELSE '60+'
+    END AS age_group, 
+    SUM(T.amount) AS total_transaction_amount
+FROM Customers C
+JOIN Accounts A ON C.customer_id = A.customer_id
+JOIN Transactions T ON A.account_number = T.account_number
+WHERE T.transaction_date >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+GROUP BY age_group;
+
+-- 9. Find the branch with the highest average account balance.
+SELECT B.branch_name, 
+       AVG(A.balance) AS avg_balance
+FROM Branch B
+JOIN Accounts A ON B.branch_id = A.branch_id
+GROUP BY B.branch_name
+ORDER BY avg_balance DESC
+LIMIT 1;
+
+-- 10. Calculate the average balance per customer at the end of each month in the last year.
+SELECT C.customer_id, 
+       YEAR(A.created_at) AS year, 
+       MONTH(A.created_at) AS month, 
+       AVG(A.balance) AS avg_balance_per_month
+FROM Customers C
+JOIN Accounts A ON C.customer_id = A.customer_id
+WHERE A.created_at >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+GROUP BY C.customer_id, YEAR(A.created_at), MONTH(A.created_at);
+
+
+
+
+
+
+
+
+
+
+--
+
